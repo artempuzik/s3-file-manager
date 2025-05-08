@@ -74,17 +74,27 @@
                                             <td>{{ $file['last_modified']->format('Y-m-d H:i:s') }}</td>
                                             <td>
                                                 <div class="btn-group">
-{{--                                                    <a href="{{ route('file-manager.download-file', ['path' => $file['path']]) }}"--}}
-{{--                                                       class="btn btn-primary btn-sm"--}}
-{{--                                                       title="Download">--}}
-{{--                                                        <i class="bi bi-download"></i>--}}
-{{--                                                    </a>--}}
-{{--                                                    <a href="{{ route('file-manager.get-url', ['path' => $file['path']]) }}"--}}
-{{--                                                       class="btn btn-info btn-sm"--}}
-{{--                                                       target="_blank"--}}
-{{--                                                       title="View">--}}
-{{--                                                        <i class="bi bi-eye"></i>--}}
-{{--                                                    </a>--}}
+                                                    @if($file['visibility'] === 'public')
+                                                        <button type="button" 
+                                                                class="btn btn-info btn-sm get-public-url"
+                                                                data-path="{{ $file['path'] }}"
+                                                                title="Get Public URL">
+                                                            <i class="bi bi-link-45deg"></i>
+                                                        </button>
+                                                    @endif
+                                                    <form action="{{ route('file-manager.update-visibility') }}" 
+                                                          method="POST" 
+                                                          class="d-inline me-2">
+                                                        @csrf
+                                                        <input type="hidden" name="path" value="{{ $file['path'] }}">
+                                                        <input type="hidden" name="visibility" 
+                                                               value="{{ $file['visibility'] === 'public' ? 'private' : 'public' }}">
+                                                        <button type="submit" 
+                                                                class="btn btn-sm {{ $file['visibility'] === 'public' ? 'btn-success' : 'btn-secondary' }}"
+                                                                title="{{ $file['visibility'] === 'public' ? 'Public' : 'Private' }}">
+                                                            <i class="bi {{ $file['visibility'] === 'public' ? 'bi-globe' : 'bi-lock' }}"></i>
+                                                        </button>
+                                                    </form>
                                                     <button class="btn btn-danger btn-sm delete-item"
                                                             data-path="{{ $file['path'] }}"
                                                             title="Delete">
@@ -145,6 +155,14 @@
                             <input type="file" class="form-control" id="file" name="file" required>
                             <input type="hidden" name="current_path" value="{{ $currentPath }}">
                         </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="visibility" name="visibility" value="public" checked>
+                                <label class="form-check-label" for="visibility">
+                                    Public Access
+                                </label>
+                            </div>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -183,6 +201,58 @@
                         document.body.appendChild(form);
                         form.submit();
                     }
+                });
+            });
+
+            // Add public URL functionality
+            const publicUrlButtons = document.querySelectorAll('.get-public-url');
+            publicUrlButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const path = this.dataset.path;
+                    
+                    fetch('{{ route("file-manager.get-public-url") }}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                        },
+                        body: JSON.stringify({
+                            path: path
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Create a temporary input to copy the URL
+                            const input = document.createElement('input');
+                            input.value = data.url;
+                            document.body.appendChild(input);
+                            input.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(input);
+
+                            // Show success message
+                            const alert = document.createElement('div');
+                            alert.className = 'alert alert-success alert-dismissible fade show';
+                            alert.innerHTML = `
+                                Public URL copied to clipboard
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            `;
+                            document.querySelector('.container').insertBefore(alert, document.querySelector('.card'));
+                        } else {
+                            // Show error message
+                            const alert = document.createElement('div');
+                            alert.className = 'alert alert-danger alert-dismissible fade show';
+                            alert.innerHTML = `
+                                ${data.message}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            `;
+                            document.querySelector('.container').insertBefore(alert, document.querySelector('.card'));
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                    });
                 });
             });
         });

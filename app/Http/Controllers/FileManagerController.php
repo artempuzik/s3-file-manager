@@ -44,12 +44,14 @@ class FileManagerController extends Controller
         $request->validate([
             'file' => 'required|file',
             'current_path' => 'required|string',
+            'visibility' => 'required|in:public,private',
         ]);
 
         $file = $request->file('file');
         $path = rtrim($request->current_path, '/') . '/' . $file->getClientOriginalName();
+        $visibility = $request->input('visibility', 'public');
 
-        $this->s3Service->uploadFile($file, $path);
+        $this->s3Service->uploadFile($file, $path, $visibility);
 
         return redirect()->back()->with('success', 'File uploaded successfully');
     }
@@ -86,5 +88,38 @@ class FileManagerController extends Controller
                 'Content-Disposition' => 'attachment; filename="' . $file['filename'] . '"'
             ]
         );
+    }
+
+    public function updateVisibility(Request $request)
+    {
+        $request->validate([
+            'path' => 'required|string',
+            'visibility' => 'required|in:public,private',
+        ]);
+
+        $this->s3Service->updateFileVisibility($request->path, $request->visibility);
+
+        return response()->json(['success' => true]);
+    }
+
+    public function getPublicUrl(Request $request)
+    {
+        $request->validate([
+            'path' => 'required|string',
+        ]);
+
+        $url = $this->s3Service->getPublicUrl($request->path);
+        
+        if (!$url) {
+            return response()->json([
+                'success' => false,
+                'message' => 'File is not public'
+            ], 400);
+        }
+
+        return response()->json([
+            'success' => true,
+            'url' => $url
+        ]);
     }
 }

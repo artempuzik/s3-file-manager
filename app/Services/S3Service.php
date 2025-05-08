@@ -36,6 +36,7 @@ class S3Service
 
         $files = [];
         $folders = [];
+        
         // Handle CommonPrefixes (folders)
         if (isset($objects['CommonPrefixes'])) {
             foreach ($objects['CommonPrefixes'] as $prefix) {
@@ -46,22 +47,23 @@ class S3Service
             }
         }
 
-        // Handle Contents (files and empty folders)
+        // Handle Contents (files)
         if (isset($objects['Contents'])) {
             foreach ($objects['Contents'] as $object) {
                 $key = $object['Key'];
                 if (substr($key, -1) === '/') {
-                    // Skip empty folders that are already in CommonPrefixes
                     continue;
-                } else {
-                    // It's a file
-                    $files[] = [
-                        'name' => basename($key),
-                        'path' => $key,
-                        'size' => $object['Size'],
-                        'last_modified' => $object['LastModified'],
-                    ];
                 }
+                
+                $visibility = $this->getFileVisibility($key);
+                
+                $files[] = [
+                    'name' => basename($key),
+                    'path' => $key,
+                    'size' => $object['Size'],
+                    'last_modified' => $object['LastModified'],
+                    'visibility' => $visibility,
+                ];
             }
         }
 
@@ -94,13 +96,13 @@ class S3Service
         return $this->s3Client->getObjectUrl($this->bucket, $path);
     }
 
-    public function uploadFile($file, $path)
+    public function uploadFile($file, $path, $visibility = 'public')
     {
         $this->s3Client->putObject([
             'Bucket' => $this->bucket,
             'Key' => $path,
             'Body' => fopen($file->getRealPath(), 'rb'),
-            'ACL' => 'public-read',
+            'ACL' => $visibility === 'public' ? 'public-read' : 'private',
         ]);
     }
 
@@ -117,5 +119,47 @@ class S3Service
             'contentLength' => $result['ContentLength'],
             'filename' => basename($path)
         ];
+    }
+
+    public function updateFileVisibility($path, $visibility)
+    {
+        $this->s3Client->putObjectAcl([
+            'Bucket' => $this->bucket,
+            'Key' => $path,
+            'ACL' => $visibility === 'public' ? 'public-read' : 'private',
+        ]);
+    }
+
+    public function getFileVisibility($path)
+    {
+        $acl = $this->s3Client->getObjectAcl([
+            'Bucket' => $this->bucket,
+            'Key' => $path,
+        ]);
+
+        foreach ($acl['Grants'] as $grant) {
+            if (isset($grant['Grantee']['URI']) && $grant['Grantee']['URI'] === 'http://acs.amazonaws.com/groups/global/AllUsers') {
+                return 'public';
+            }
+        }
+        return 'private';
+    }
+
+    public function getPublicUrl($path)
+    {
+        // Check if file is public
+        $visibility = $this->getFileVisibility($path);
+        if ($visibility !== 'public') {
+            return null;
+        }
+
+        // Generate a pre-signed URL that will be valid for 1 hour
+        $command = $this->s3Client->getCommand('GetObject', [
+            'Bucket' => $this->bucket,
+            'Key' => $path
+        ]);
+
+        $request = $this->s3Client->createPresignedRequest($command, '+1 hour');
+        return (string) $request->getUri();
     }
 }

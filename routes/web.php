@@ -14,4 +14,6 @@ Route::prefix('file-manager')->group(function () {
     Route::post('/delete-file', [FileManagerController::class, 'deleteFile'])->name('file-manager.delete-file');
     Route::get('/download-file/{path}', [FileManagerController::class, 'downloadFile'])->name('file-manager.download-file');
     Route::get('/get-url/{path}', [FileManagerController::class, 'getFileUrl'])->name('file-manager.get-url');
+    Route::post('/update-visibility', [FileManagerController::class, 'updateVisibility'])->name('file-manager.update-visibility');
+    Route::post('/get-public-url', [FileManagerController::class, 'getPublicUrl'])->name('file-manager.get-public-url');
 });
