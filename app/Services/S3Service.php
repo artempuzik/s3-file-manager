@@ -168,21 +168,17 @@ class S3Service
             return null;
         }
 
-        // Return direct public URL without query parameters
-        // Use configured URL if available, otherwise construct from endpoint
-        $baseUrl = config('filesystems.disks.s3.url');
+        // Generate a pre-signed URL that will be valid for 1 hour
+        $command = $this->s3Client->getCommand('GetObject', [
+            'Bucket' => $this->bucket,
+            'Key' => $path
+        ]);
 
-        if (!$baseUrl) {
-            // Fallback: construct URL from endpoint
-            $endpoint = config('filesystems.disks.s3.endpoint');
-            $bucket = $this->bucket;
-            $baseUrl = rtrim($endpoint, '/');
-        }
+        $request = $this->s3Client->createPresignedRequest($command, '+1 hour');
+        $fullUrl = (string) $request->getUri();
 
-        // Remove trailing slash and construct full URL
-        $baseUrl = rtrim($baseUrl, '/');
-        $url = $baseUrl . '/' . ltrim($path, '/');
-
-        return $url;
+        // Remove query parameters - split by '?' and take first part
+        $urlParts = explode('?', $fullUrl, 2);
+        return $urlParts[0];
     }
 }
