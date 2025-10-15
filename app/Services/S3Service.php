@@ -21,6 +21,17 @@ class S3Service
                 'key'    => config('filesystems.disks.s3.key'),
                 'secret' => config('filesystems.disks.s3.secret'),
             ],
+            'http' => [
+                'timeout' => 600,          // 10 minutes timeout for operations
+                'connect_timeout' => 120,  // 2 minutes for connection
+                'read_timeout' => 600,     // 10 minutes for reading response
+                'decode_content' => false, // Don't decode to save memory
+                'verify' => true,          // Verify SSL certificates
+            ],
+            'retries' => [
+                'mode' => 'standard',      // Retry on network errors
+                'max_attempts' => 3,       // Retry up to 3 times
+            ],
         ]);
         $this->bucket = config('filesystems.disks.s3.bucket');
         $this->folder = config('filesystems.disks.s3.path');
@@ -36,7 +47,7 @@ class S3Service
 
         $files = [];
         $folders = [];
-        
+
         // Handle CommonPrefixes (folders)
         if (isset($objects['CommonPrefixes'])) {
             foreach ($objects['CommonPrefixes'] as $prefix) {
@@ -54,9 +65,9 @@ class S3Service
                 if (substr($key, -1) === '/') {
                     continue;
                 }
-                
+
                 $visibility = $this->getFileVisibility($key);
-                
+
                 $files[] = [
                     'name' => basename($key),
                     'path' => $key,
@@ -98,11 +109,15 @@ class S3Service
 
     public function uploadFile($file, $path, $visibility = 'public')
     {
+        // Ensure we have enough time for large file uploads
+        set_time_limit(600);
+
         $this->s3Client->putObject([
             'Bucket' => $this->bucket,
             'Key' => $path,
             'Body' => fopen($file->getRealPath(), 'rb'),
             'ACL' => $visibility === 'public' ? 'public-read' : 'private',
+            'ContentType' => $file->getMimeType(), // Set correct content type
         ]);
     }
 
@@ -112,7 +127,7 @@ class S3Service
             'Bucket' => $this->bucket,
             'Key' => $path
         ]);
-        
+
         return [
             'content' => $result['Body'],
             'contentType' => $result['ContentType'],
@@ -153,13 +168,21 @@ class S3Service
             return null;
         }
 
-        // Generate a pre-signed URL that will be valid for 1 hour
-        $command = $this->s3Client->getCommand('GetObject', [
-            'Bucket' => $this->bucket,
-            'Key' => $path
-        ]);
+        // Return direct public URL without query parameters
+        // Use configured URL if available, otherwise construct from endpoint
+        $baseUrl = config('filesystems.disks.s3.url');
 
-        $request = $this->s3Client->createPresignedRequest($command, '+1 hour');
-        return (string) $request->getUri();
+        if (!$baseUrl) {
+            // Fallback: construct URL from endpoint
+            $endpoint = config('filesystems.disks.s3.endpoint');
+            $bucket = $this->bucket;
+            $baseUrl = rtrim($endpoint, '/');
+        }
+
+        // Remove trailing slash and construct full URL
+        $baseUrl = rtrim($baseUrl, '/');
+        $url = $baseUrl . '/' . ltrim($path, '/');
+
+        return $url;
     }
 }

@@ -41,19 +41,32 @@ class FileManagerController extends Controller
 
     public function uploadFile(Request $request)
     {
+        // Set maximum execution time to 10 minutes (600 seconds)
+        set_time_limit(600);
+
+        // Increase memory limit if needed
+        ini_set('memory_limit', '512M');
+
         $request->validate([
-            'file' => 'required|file',
+            'files.*' => 'required|file|max:512000', // Max 500MB per file
             'current_path' => 'required|string',
             'visibility' => 'required|in:public,private',
         ]);
 
-        $file = $request->file('file');
-        $path = rtrim($request->current_path, '/') . '/' . $file->getClientOriginalName();
+        $files = $request->file('files');
         $visibility = $request->input('visibility', 'public');
+        $uploadedCount = 0;
 
-        $this->s3Service->uploadFile($file, $path, $visibility);
+        if (is_array($files)) {
+            foreach ($files as $file) {
+                $path = rtrim($request->current_path, '/') . '/' . $file->getClientOriginalName();
+                $this->s3Service->uploadFile($file, $path, $visibility);
+                $uploadedCount++;
+            }
+            return redirect()->back()->with('success', $uploadedCount . ' file(s) uploaded successfully');
+        }
 
-        return redirect()->back()->with('success', 'File uploaded successfully');
+        return redirect()->back()->with('error', 'No files selected');
     }
 
     public function deleteFile(Request $request)
@@ -76,7 +89,7 @@ class FileManagerController extends Controller
     public function downloadFile($path)
     {
         $file = $this->s3Service->downloadFile($path);
-        
+
         return response()->stream(
             function () use ($file) {
                 echo $file['content'];
@@ -109,7 +122,7 @@ class FileManagerController extends Controller
         ]);
 
         $url = $this->s3Service->getPublicUrl($request->path);
-        
+
         if (!$url) {
             return response()->json([
                 'success' => false,

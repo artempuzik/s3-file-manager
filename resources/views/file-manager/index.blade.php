@@ -73,28 +73,22 @@
                                             <td>{{ number_format($file['size'] / 1024, 2) }} KB</td>
                                             <td>{{ $file['last_modified']->format('Y-m-d H:i:s') }}</td>
                                             <td>
-                                                <div class="btn-group">
+                                                <div class="btn-group" role="group">
                                                     @if($file['visibility'] === 'public')
-                                                        <button type="button" 
-                                                                class="btn btn-info btn-sm get-public-url"
+                                                        <button type="button"
+                                                                class="btn btn-info btn-sm copy-public-url"
                                                                 data-path="{{ $file['path'] }}"
-                                                                title="Get Public URL">
-                                                            <i class="bi bi-link-45deg"></i>
+                                                                title="Copy Public URL">
+                                                            <i class="bi bi-clipboard"></i>
                                                         </button>
                                                     @endif
-                                                    <form action="{{ route('file-manager.update-visibility') }}" 
-                                                          method="POST" 
-                                                          class="d-inline me-2">
-                                                        @csrf
-                                                        <input type="hidden" name="path" value="{{ $file['path'] }}">
-                                                        <input type="hidden" name="visibility" 
-                                                               value="{{ $file['visibility'] === 'public' ? 'private' : 'public' }}">
-                                                        <button type="submit" 
-                                                                class="btn btn-sm {{ $file['visibility'] === 'public' ? 'btn-success' : 'btn-secondary' }}"
-                                                                title="{{ $file['visibility'] === 'public' ? 'Public' : 'Private' }}">
-                                                            <i class="bi {{ $file['visibility'] === 'public' ? 'bi-globe' : 'bi-lock' }}"></i>
-                                                        </button>
-                                                    </form>
+                                                    <button type="button"
+                                                            class="btn btn-sm {{ $file['visibility'] === 'public' ? 'btn-success' : 'btn-secondary' }} toggle-visibility"
+                                                            data-path="{{ $file['path'] }}"
+                                                            data-visibility="{{ $file['visibility'] }}"
+                                                            title="Toggle {{ $file['visibility'] === 'public' ? 'Public' : 'Private' }}">
+                                                        <i class="bi {{ $file['visibility'] === 'public' ? 'bi-globe' : 'bi-lock' }}"></i>
+                                                    </button>
                                                     <button class="btn btn-danger btn-sm delete-item"
                                                             data-path="{{ $file['path'] }}"
                                                             title="Delete">
@@ -141,32 +135,53 @@
 
     <!-- Upload File Modal -->
     <div class="modal fade" id="uploadFileModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
-                <form action="{{ route('file-manager.upload-file') }}" method="POST" enctype="multipart/form-data">
+                <form action="{{ route('file-manager.upload-file') }}" method="POST" enctype="multipart/form-data" id="uploadForm">
                     @csrf
                     <div class="modal-header">
-                        <h5 class="modal-title">Upload File</h5>
+                        <h5 class="modal-title">Upload Files</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <div class="mb-3">
-                            <label for="file" class="form-label">Select File</label>
-                            <input type="file" class="form-control" id="file" name="file" required>
+                            <label for="files" class="form-label">Select Files (Multiple)</label>
+                            <input type="file"
+                                   class="form-control"
+                                   id="files"
+                                   name="files[]"
+                                   multiple
+                                   required>
                             <input type="hidden" name="current_path" value="{{ $currentPath }}">
+                            <div class="form-text">You can select multiple files at once. Max 500MB per file.</div>
                         </div>
+                        <div class="mb-3" id="filesList"></div>
                         <div class="mb-3">
                             <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="visibility" name="visibility" value="public" checked>
-                                <label class="form-check-label" for="visibility">
-                                    Public Access
+                                <input class="form-check-input" type="radio" name="visibility" id="visibilityPublic" value="public" checked>
+                                <label class="form-check-label" for="visibilityPublic">
+                                    <i class="bi bi-globe"></i> Public Access
                                 </label>
                             </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="visibility" id="visibilityPrivate" value="private">
+                                <label class="form-check-label" for="visibilityPrivate">
+                                    <i class="bi bi-lock"></i> Private Access
+                                </label>
+                            </div>
+                        </div>
+                        <div class="progress d-none" id="uploadProgress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar"
+                                 style="width: 0%"
+                                 id="uploadProgressBar">0%</div>
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                        <button type="submit" class="btn btn-primary">Upload File</button>
+                        <button type="submit" class="btn btn-primary" id="uploadButton">
+                            <i class="bi bi-upload"></i> Upload Files
+                        </button>
                     </div>
                 </form>
             </div>
@@ -176,8 +191,69 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const deleteButtons = document.querySelectorAll('.delete-item');
+            // Helper function to show alerts
+            function showAlert(message, type = 'success') {
+                const alert = document.createElement('div');
+                alert.className = `alert alert-${type} alert-dismissible fade show`;
+                alert.innerHTML = `
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                `;
+                document.querySelector('.container').insertBefore(alert, document.querySelector('.card'));
 
+                // Auto-dismiss after 5 seconds
+                setTimeout(() => {
+                    alert.remove();
+                }, 5000);
+            }
+
+            // File selection display
+            const filesInput = document.getElementById('files');
+            const filesList = document.getElementById('filesList');
+
+            filesInput.addEventListener('change', function() {
+                filesList.innerHTML = '';
+                if (this.files.length > 0) {
+                    const list = document.createElement('div');
+                    list.className = 'alert alert-info';
+                    list.innerHTML = '<strong>Selected files:</strong><ul class="mb-0 mt-2">';
+
+                    Array.from(this.files).forEach(file => {
+                        const size = (file.size / 1024 / 1024).toFixed(2);
+                        list.innerHTML += `<li>${file.name} (${size} MB)</li>`;
+                    });
+
+                    list.innerHTML += '</ul>';
+                    filesList.appendChild(list);
+                }
+            });
+
+            // Upload form with progress
+            const uploadForm = document.getElementById('uploadForm');
+            const uploadProgress = document.getElementById('uploadProgress');
+            const uploadProgressBar = document.getElementById('uploadProgressBar');
+            const uploadButton = document.getElementById('uploadButton');
+
+            uploadForm.addEventListener('submit', function(e) {
+                const files = filesInput.files;
+                if (files.length > 0) {
+                    uploadButton.disabled = true;
+                    uploadProgress.classList.remove('d-none');
+
+                    // Simulate progress (since we can't track real upload progress with traditional form submit)
+                    let progress = 0;
+                    const interval = setInterval(() => {
+                        progress += 5;
+                        if (progress <= 90) {
+                            uploadProgressBar.style.width = progress + '%';
+                            uploadProgressBar.textContent = progress + '%';
+                        }
+                    }, 200);
+                }
+            });
+
+            // Delete functionality
+            const deleteButtons = document.querySelectorAll('.delete-item');
             deleteButtons.forEach(button => {
                 button.addEventListener('click', function() {
                     if (confirm('Are you sure you want to delete this item?')) {
@@ -204,54 +280,108 @@
                 });
             });
 
-            // Add public URL functionality
-            const publicUrlButtons = document.querySelectorAll('.get-public-url');
-            publicUrlButtons.forEach(button => {
+            // Copy public URL functionality
+            const copyUrlButtons = document.querySelectorAll('.copy-public-url');
+            copyUrlButtons.forEach(button => {
                 button.addEventListener('click', function() {
                     const path = this.dataset.path;
-                    
+                    const btn = this;
+                    const originalIcon = btn.innerHTML;
+
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+
                     fetch('{{ route("file-manager.get-public-url") }}', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                             'X-CSRF-TOKEN': '{{ csrf_token() }}'
                         },
+                        body: JSON.stringify({ path: path })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Use modern clipboard API
+                            navigator.clipboard.writeText(data.url).then(() => {
+                                btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+                                showAlert('Public URL copied to clipboard!', 'success');
+
+                                setTimeout(() => {
+                                    btn.innerHTML = originalIcon;
+                                    btn.disabled = false;
+                                }, 2000);
+                            }).catch(() => {
+                                // Fallback for older browsers
+                                const input = document.createElement('input');
+                                input.value = data.url;
+                                document.body.appendChild(input);
+                                input.select();
+                                document.execCommand('copy');
+                                document.body.removeChild(input);
+
+                                btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+                                showAlert('Public URL copied to clipboard!', 'success');
+
+                                setTimeout(() => {
+                                    btn.innerHTML = originalIcon;
+                                    btn.disabled = false;
+                                }, 2000);
+                            });
+                        } else {
+                            showAlert(data.message || 'Failed to get public URL', 'danger');
+                            btn.innerHTML = originalIcon;
+                            btn.disabled = false;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        showAlert('Error getting public URL', 'danger');
+                        btn.innerHTML = originalIcon;
+                        btn.disabled = false;
+                    });
+                });
+            });
+
+            // Toggle visibility functionality
+            const toggleVisibilityButtons = document.querySelectorAll('.toggle-visibility');
+            toggleVisibilityButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const path = this.dataset.path;
+                    const currentVisibility = this.dataset.visibility;
+                    const newVisibility = currentVisibility === 'public' ? 'private' : 'public';
+                    const btn = this;
+
+                    btn.disabled = true;
+
+                    fetch('{{ route("file-manager.update-visibility") }}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                        },
                         body: JSON.stringify({
-                            path: path
+                            path: path,
+                            visibility: newVisibility
                         })
                     })
                     .then(response => response.json())
                     .then(data => {
                         if (data.success) {
-                            // Create a temporary input to copy the URL
-                            const input = document.createElement('input');
-                            input.value = data.url;
-                            document.body.appendChild(input);
-                            input.select();
-                            document.execCommand('copy');
-                            document.body.removeChild(input);
-
-                            // Show success message
-                            const alert = document.createElement('div');
-                            alert.className = 'alert alert-success alert-dismissible fade show';
-                            alert.innerHTML = `
-                                Public URL copied to clipboard
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                            `;
-                            document.querySelector('.container').insertBefore(alert, document.querySelector('.card'));
+                            showAlert(`File visibility changed to ${newVisibility}`, 'success');
+                            // Reload page to update UI
+                            setTimeout(() => {
+                                location.reload();
+                            }, 1000);
                         } else {
-                            // Show error message
-                            const alert = document.createElement('div');
-                            alert.className = 'alert alert-danger alert-dismissible fade show';
-                            alert.innerHTML = `
-                                ${data.message}
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                            `;
-                            document.querySelector('.container').insertBefore(alert, document.querySelector('.card'));
+                            showAlert('Failed to update visibility', 'danger');
+                            btn.disabled = false;
                         }
                     })
                     .catch(error => {
                         console.error('Error:', error);
+                        showAlert('Error updating visibility', 'danger');
+                        btn.disabled = false;
                     });
                 });
             });

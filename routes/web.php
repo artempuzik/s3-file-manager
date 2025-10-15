@@ -1,13 +1,14 @@
 <?php
 
 use App\Http\Controllers\FileManagerController;
+use App\Http\Middleware\IncreaseTimeout;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return redirect()->to('file-manager');
 });
 
-Route::prefix('file-manager')->group(function () {
+Route::prefix('file-manager')->middleware(IncreaseTimeout::class)->group(function () {
     Route::get('/', [FileManagerController::class, 'index'])->name('file-manager.index');
     Route::post('/create-folder', [FileManagerController::class, 'createFolder'])->name('file-manager.create-folder');
     Route::post('/upload-file', [FileManagerController::class, 'uploadFile'])->name('file-manager.upload-file');
